@@ -1,13 +1,26 @@
 ﻿using ClosedXML.Excel;
 using CashFlow.Domain.Reports;
+using DocumentFormat.OpenXml.Wordprocessing;
+using CashFlow.Domain.Repositories.Expenses;
+using CashFlow.Domain.Enums;
 
 namespace CashFlow.Application.UseCases.Expenses.Reports.Excel
 {
     public class GenerateExpenseReportExcelUseCase : IGenerateExpenseReportExcelUseCase
     {
+        private readonly IExpensesReadOnlyRepository _repository;
+
+        public GenerateExpenseReportExcelUseCase(IExpensesReadOnlyRepository repository)
+        {
+            _repository = repository;
+        }
         public async Task<byte[]> Execute(DateOnly month)
         {
-            var workbook = new XLWorkbook();
+            var expenses = await _repository.FilteredByMonth(month);
+            if(expenses.Count == 0)
+                return [];
+
+            using var workbook = new XLWorkbook();
 
             workbook.Author = "Yuri Sanches";
             workbook.Style.Font.FontSize = 12;
@@ -16,6 +29,41 @@ namespace CashFlow.Application.UseCases.Expenses.Reports.Excel
             var worksheet = workbook.Worksheets.Add(month.ToString("Y"));
 
             InsertHeader(worksheet);
+
+            var raw = 2;
+            foreach(var expense in expenses)
+            {
+                worksheet.Cell($"A{raw}").Value = expense.Title;
+                worksheet.Cell($"B{raw}").Value = expense.Date;
+                worksheet.Cell($"C{raw}").Value = ConvertPaymentType(expense.PaymentType);
+                
+                worksheet.Cell($"D{raw}").Value = expense.Amount;
+                worksheet.Cell($"D{raw}").Style.NumberFormat.Format = "- $ #,##0.00";
+
+                worksheet.Cell($"E{raw}").Value = expense.Description;
+
+                raw++;
+            }
+
+            worksheet.Columns().AdjustToContents();
+
+            var file = new MemoryStream();
+            
+            workbook.SaveAs(file);
+
+            return file.ToArray();
+        }
+
+        private string ConvertPaymentType(PaymentType paymentType)
+        {
+            return paymentType switch
+            {
+                PaymentType.Cash => "Cash",
+                PaymentType.CreditCard => "Credit Card",
+                PaymentType.DebitCard => "Debit Card",
+                PaymentType.EletronicTransfer => "Eletronic Transfer",
+                _ => string.Empty
+            };
         }
 
         private void InsertHeader(IXLWorksheet worksheet)
